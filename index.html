@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="description" content="校园 720° 全景漫游"/>
+<link rel="icon" href="data:,"/>
+<title>全景漫游</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0f17;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif; }
+  #pano { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+  #pano:active { cursor: grabbing; }
+
+  /* ---------- 顶栏 ---------- */
+  #topbar { position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; padding: 14px 16px; pointer-events: none; }
+  .glass { background: rgba(13, 20, 33, .66); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,.14); box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+  .btns { pointer-events: auto; display: flex; gap: 8px; }
+  .ctl { width: 42px; height: 42px; border: 1px solid rgba(255,255,255,.14); border-radius: 12px;
+    background: rgba(13,20,33,.66); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    color: #dbe6f5; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: background .2s, color .2s, transform .1s; }
+  .ctl:hover { background: rgba(34,211,238,.22); color: #7ee7f7; }
+  .ctl:active { transform: scale(.94); }
+  .ctl.on { background: rgba(34,211,238,.3); color: #7ee7f7; border-color: rgba(126,231,247,.5); }
+  .ctl svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- 热点 ---------- */
+  .hotspot { position: relative; }
+  .link-hotspot { width: 60px; height: 60px; margin-left: -30px; margin-top: -30px;
+    cursor: pointer; opacity: .9; transition: opacity .2s; }
+  .link-hotspot:hover { opacity: 1; }
+  .link-hotspot-icon { width: 100%; height: 100%; display: block; cursor: pointer;
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,.5)); }
+  .link-hotspot-tooltip { position: absolute; left: 100%; top: 14px; margin-left: 3px;
+    font-size: 13px; padding: 7px 12px; border-radius: 6px; background: rgba(13,20,33,.85);
+    border: 1px solid rgba(255,255,255,.14); color: #fff; white-space: nowrap; max-width: 300px;
+    overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateX(-8px);
+    transition: opacity .3s, transform .3s; pointer-events: none; }
+  .link-hotspot:hover .link-hotspot-tooltip { opacity: 1; transform: translateX(0); }
+  .info-hotspot .info-dot { width: 34px; height: 34px; border-radius: 50%; border: 2px solid #fff;
+    background: rgba(13,20,33,.72); color: #fff; font-style: italic; font-weight: 700; font-family: Georgia, serif;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform .18s; }
+  .info-hotspot .info-dot:hover { transform: scale(1.12); }
+  .info-hotspot .info-card { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%);
+    width: 220px; padding: 12px 14px; border-radius: 12px; background: rgba(13,20,33,.92);
+    border: 1px solid rgba(255,255,255,.16); color: #e6eefb; font-size: 13px; line-height: 1.55;
+    display: none; box-shadow: 0 8px 28px rgba(0,0,0,.5); }
+  .info-hotspot .info-card p { margin: 0 0 6px; }
+  .info-hotspot .info-card a { color: #7ee7f7; text-decoration: none; }
+  .info-hotspot.open .info-card { display: block; }
+
+  /* ---------- 场景名称提示 ---------- */
+  #toast { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%) translateY(16px);
+    z-index: 20; padding: 9px 22px; border-radius: 999px; color: #fff; font-size: 14px; letter-spacing: 2px;
+    background: rgba(13,20,33,.72); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.16);
+    opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ---------- 加载页 ---------- */
+  #loader { position: absolute; inset: 0; z-index: 50; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; background: #0b0f17; color: #9fb4d0;
+    transition: opacity .5s; }
+  #loader.hide { opacity: 0; pointer-events: none; }
+  #loader .spin { width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(126,231,247,.18);
+    border-top-color: #22d3ee; animation: rot 1s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  #loader .msg { font-size: 14px; letter-spacing: 3px; }
+  #loader.err .spin { display: none; }
+  #loader.err .msg { color: #ff8f8f; letter-spacing: 1px; }
+
+  @media (max-width: 640px) {
+    .ctl { width: 38px; height: 38px; }
+    #toast { bottom: 22px; }
+  }
+</style>
+</head>
+<body>
+  <div id="pano"></div>
+
+  <header id="topbar">
+    <div class="btns">
+      <button class="ctl" id="btn-home" title="回到初始视角">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>
+      </button>
+      <button class="ctl" id="btn-rot" title="自动旋转 开/关">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v5h-5"/></svg>
+      </button>
+      <button class="ctl" id="btn-fs" title="全屏">
+        <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="toast"></div>
+
+  <div id="loader">
+    <div class="spin"></div>
+    <div class="msg">正在进入全景视角…</div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="marzipano.js"></script>
+  <script>
+  (function () {
+    'use strict';
+
+    var loader = document.getElementById('loader');
+    var loaderMsg = loader.querySelector('.msg');
+
+    // 环境检查
+    function webglOK() {
+      try {
+        var c = document.createElement('canvas');
+        return !!(window.WebGLRenderingContext && (c.getContext('webgl') || c.getContext('experimental-webgl')));
+      } catch (e) { return false; }
+    }
+    if (typeof APP_DATA === 'undefined' || typeof Marzipano === 'undefined' || !webglOK()) {
+      loader.classList.add('err');
+      loaderMsg.textContent = typeof Marzipano === 'undefined'
+        ? '渲染库 marzipano.js 加载失败，请检查文件是否完整'
+        : '当前浏览器不支持 WebGL，请更换现代浏览器后重试';
+      return;
+    }
+
+    var data = APP_DATA;
+    var TILE_PREFIX = 'tiles';
+
+    document.title = '校园全景漫游' + (data.name ? ' · ' + data.name : '');
+
+    /* ---------- Viewer ---------- */
+    var viewer = new Marzipano.Viewer(document.getElementById('pano'), {
+      controls: { mouseViewMode: (data.settings && data.settings.mouseViewMode) || 'drag' }
+    });
+
+    /* ---------- 自动旋转 ---------- */
+    var autorotate = Marzipano.autorotate({ yawSpeed: 0.035, targetPitch: 0, targetFov: Math.PI / 3 });
+    var autorotateOn = !!(data.settings && data.settings.autorotateEnabled);
+    var idleTimer = null;
+    var btnRot = document.getElementById('btn-rot');
+
+    function startAutorotate() {
+      if (!autorotateOn) return;
+      viewer.startMovement(autorotate);
+      btnRot.classList.add('on');
+    }
+    function stopAutorotate() {
+      viewer.stopMovement();
+      btnRot.classList.remove('on');
+    }
+    btnRot.addEventListener('click', function () {
+      autorotateOn = !autorotateOn;
+      if (autorotateOn) startAutorotate(); else stopAutorotate();
+    });
+    try {
+      viewer.controls().addEventListener('interactionStart', function () {
+        clearTimeout(idleTimer);
+        stopAutorotate();
+      });
+      viewer.controls().addEventListener('interactionEnd', function () {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(startAutorotate, 5000);
+      });
+    } catch (e) { /* 交互事件不可用时忽略 */ }
+
+    /* ---------- 场景构建 ---------- */
+    var scenes = data.scenes || [];
+    var sceneIndex = {};   // id -> { data, scene, view }
+    var nameIndex = {};    // id -> name（先建全量索引，热点 tooltip 才能取到目标场景名）
+    scenes.forEach(function (s) { nameIndex[s.id] = s.name || s.id; });
+
+    scenes.forEach(function (sceneData) {
+      var source = Marzipano.ImageUrlSource.fromString(
+        TILE_PREFIX + '/' + sceneData.id + '/{z}/{f}/{y}/{x}.jpg'
+      );
+      var geometry = new Marzipano.CubeGeometry(sceneData.levels);
+      var view = new Marzipano.RectilinearView(sceneData.initialViewParameters);
+      var panoScene = viewer.createScene({
+        source: source,
+        geometry: geometry,
+        view: view,
+        pinFirstLevel: true
+      });
+
+      // 场景跳转热点（官方原版图标样式）
+      (sceneData.linkHotspots || []).forEach(function (h) {
+        var el = document.createElement('div');
+        el.className = 'hotspot link-hotspot';
+        el.setAttribute('role', 'button');
+
+        var icon = document.createElement('img');
+        icon.className = 'link-hotspot-icon';
+        icon.src = 'img/link.png';
+        icon.alt = nameIndex[h.target] || '前往下一场景';
+        icon.draggable = false;
+        icon.style.transform = 'rotate(' + (h.rotation || 0) + 'rad)';
+
+        var tip = document.createElement('div');
+        tip.className = 'link-hotspot-tooltip';
+        tip.textContent = nameIndex[h.target] || '';
+
+        el.appendChild(icon);
+        el.appendChild(tip);
+
+        el.addEventListener('click', function () {
+          var t = sceneIndex[h.target];
+          if (t) switchScene(t);
+        });
+
+        // 防止热点上的触摸/滚轮事件干扰视角控制（与官方模板一致）
+        ['touchstart', 'touchmove', 'touchend', 'touchcancel',
+         'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'wheel']
+          .forEach(function (evt) {
+            el.addEventListener(evt, function (e) { e.stopPropagation(); });
+          });
+
+        panoScene.hotspotContainer().createHotspot(el, { yaw: h.yaw, pitch: h.pitch });
+      });
+
+      // 信息热点（预留支持）
+      (sceneData.infoHotspots || []).forEach(function (h) {
+        var wrap = document.createElement('div');
+        wrap.className = 'hotspot info-hotspot';
+        var dot = document.createElement('button');
+        dot.className = 'info-dot';
+        dot.textContent = 'i';
+        var card = document.createElement('div');
+        card.className = 'info-card';
+        if (h.text) { var p = document.createElement('p'); p.textContent = h.text; card.appendChild(p); }
+        if (h.url) {
+          var a = document.createElement('a');
+          a.href = h.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '查看详情';
+          card.appendChild(a);
+        }
+        dot.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var wasOpen = wrap.classList.contains('open');
+          closeAllInfoCards();
+          if (!wasOpen) wrap.classList.add('open');
+        });
+        wrap.appendChild(dot);
+        wrap.appendChild(card);
+        panoScene.hotspotContainer().createHotspot(wrap, { yaw: h.yaw, pitch: h.pitch },
+          { rotation: h.rotation || 0 });
+      });
+
+      sceneIndex[sceneData.id] = { data: sceneData, scene: panoScene, view: view };
+    });
+
+    function closeAllInfoCards() {
+      document.querySelectorAll('.info-hotspot.open').forEach(function (n) { n.classList.remove('open'); });
+    }
+    document.addEventListener('click', closeAllInfoCards);
+
+    /* ---------- 切换场景 ---------- */
+    var current = null;
+    var toast = document.getElementById('toast');
+    var toastTimer = null;
+
+    function switchScene(entry, resetView) {
+      if (!entry) return;
+      if (resetView) entry.view.setParameters(entry.data.initialViewParameters);
+      viewer.switchScene(entry.scene);
+      current = entry;
+
+      try { history.replaceState(null, '', '#' + entry.data.id); } catch (e) { /* file:// 下忽略 */ }
+
+      toast.textContent = entry.data.name || '';
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 1800);
+
+      startAutorotate();
+    }
+
+    /* ---------- 其他按钮 ---------- */
+    document.getElementById('btn-home').addEventListener('click', function () {
+      if (current) {
+        current.view.setParameters(current.data.initialViewParameters);
+        toast.textContent = '已回到初始视角';
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 1200);
+      }
+    });
+
+    var btnFs = document.getElementById('btn-fs');
+    btnFs.addEventListener('click', function () {
+      if (document.fullscreenElement) {
+        document.exitFullscreen && document.exitFullscreen();
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen();
+      }
+    });
+
+    /* ---------- URL hash 直达 ---------- */
+    window.addEventListener('hashchange', function () {
+      var id = decodeURIComponent(location.hash.slice(1));
+      var entry = sceneIndex[id];
+      if (entry && entry !== current) switchScene(entry);
+    });
+
+    /* ---------- 初始进入 ---------- */
+    var initialId = location.hash.slice(1);
+    var initial = (initialId && sceneIndex[decodeURIComponent(initialId)]) || scenes[0] && sceneIndex[scenes[0].id];
+    if (initial) switchScene(initial, true);
+
+    /* ---------- 加载完成 ---------- */
+    var loaded = false;
+    function hideLoader() {
+      if (loaded) return;
+      loaded = true;
+      loader.classList.add('hide');
+    }
+    viewer.addEventListener('idle', hideLoader);
+    viewer.addEventListener('sceneChange', function () { setTimeout(hideLoader, 400); });
+    setTimeout(hideLoader, 5000); // 兜底
+
+    // 调试/扩展钩子
+    window.__tour = { viewer: viewer, scenes: sceneIndex, data: data };
+  })();
+  </script>
+</body>
+</html>
